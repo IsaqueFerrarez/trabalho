@@ -1,7 +1,36 @@
 # Compilador Front-End JFlex/CUP
 Este projeto implementa um compilador simplificado para uma linguagem acadêmica/fictícia, dividida nas seguintes partes: Análise Léxica (JFlex), Análise Sintática (CUP), **Análise Semântica** e **Geração de Código Intermediário (Assembly Fictício)**.
 
-## Estrutura das Novas Entregas (Parte 2 do Trabalho)
+## Comando para rodar o Analisador Sintático
+
+java -cp .:/usr/share/java/cup.jar compilador.Main
+
+## Caso seja necessário recompilar tudo, rode esses comandos:
+
+**Apaga tudo para evitar cache**
+
+rm compilador/*.class compilador/Lexer.java compilador/parser.java compilador/sym.java
+
+**Gera o Parser**
+
+java -jar /usr/share/java/cup.jar -destdir compilador -parser parser -symbols sym compilador/Parser.cup
+
+**Gera o Lexer**
+
+jflex compilador/Lexer.flex
+
+**Compila tudo**
+
+javac -cp .:/usr/share/java/cup.jar compilador/*.java
+
+**Roda**
+
+java -cp .:/usr/share/java/cup.jar compilador.Main
+
+---
+
+## Estrutura das Novas Entregas (Parte 2 do Trabalho - Semântica e Geração de Código)
+
 Neste ciclo de entrega, o projeto foi estendido adicionando o processo de tradução e semântica por acoplamento nos eventos léxicos gerados. Foram criados os seguintes pilares listados no escopo do trabalho:
 
 * **Tabela de Símbolos (`SymbolTable.java`)**: Cuida do mapeamento de variáveis de forma hierárquica usando Pílhas (Stacks/Escopos). Garante o ciclo de vida dinâmico entre chaves `{ ... }` permitindo recuar nomes.
@@ -13,33 +42,7 @@ Neste ciclo de entrega, o projeto foi estendido adicionando o processo de tradu�
     - `teste_erro_semantico_X.txt` quebram e disparam as mensagens padronizadas dos problemas descritos.
 * Foram adicionados extensos comentários de documentação em cima de todos os métodos dos novos arquivos implementados.
 
-## Comando para rodar o Compilador Completo
-
-Assumindo que você possui o Java habilitado ou importado dentro da interface de terminal do projeto.
-
-### 1- Recompilar toda a Especificação JFlex/CUP modificada:
-
-*Você deve executar os comandos estando DENTRO da pasta `compilador/`:*
-
-```bash
-# Apagando caches prévios caso recompile
-rm *.class Lexer.java parser.java sym.java
-
-# 1. Regenerar Léxico a partir do .flex
-jflex Lexer.flex
-
-# 2. Regenerar Parser a partir do .cup modificado (Injeta o Semântico)
-# Use o -cp se o java-cup estiver local, ou use o jar isolado apontado ex: -jar /usr/share/...
-java -cp .. java_cup.Main -parser parser -symbols sym Parser.cup
-
-# 3. Recompilar o Bytecode do projeto inteiro (Classes novas implementadas)
-javac -cp .. *.java
-
-# 4. Executar os Lotes (Injeta e traduz os 6 testes novos)
-java -cp .. compilador.Main
-```
-
-### O que acontece na Execução?
-Ao disparar o Java pelo `Main`, a nossa classe de inicialização puxa e varre consecutivamente todos os 6 testes descritos no root do projeto.
-1. Nos casos corretos, ele imprimirá mensagens de "Sucesso!" na tela e lançara um arquivo físico no final usando a extensão convertida do Assembly para visualizar os Gotos.
-2. Nos casos propositais de erro Semântico do trabalho, os alertas acusando o nome da Classe Culpada, tipo incompatível e **Linha/Coluna** exata das re-declarações e invocações proíbidas serão revelados via StdOut pelo rastreador de *SemanticAnalyzer*.
+### O que acontece na Execução dos Lotes de Teste (Main)?
+Ao disparar o Java pelo `Main`, a nossa classe de inicialização puxa e varre consecutivamente todos os 6 testes (`teste_correto_X` e `teste_erro_semantico_X`) descritos internamente.
+1. Nos casos corretos, ele imprimirá mensagens de "Sucesso!" na tela e lançará um arquivo físico no final usando a extensão convertida do Assembly fictício para evidenciar a geração de código.
+2. Nos casos propositais de erro Semântico do trabalho, os alertas acusando o nome da Classe Culpada, tipo incompatível e **Linha/Coluna** exata das re-declarações e invocações proíbidas serão revelados via console.
