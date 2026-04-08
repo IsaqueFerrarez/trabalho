@@ -3,8 +3,13 @@ package compilador;
 import java_cup.runtime.*;
 
 parser code {:
+    // ANOTAÇÃO PARTE 2: Acoplamento das Classes Lógicas dentro do objeto vivo Parser.java 
+    // Dessa forma, não construímos uma "AST" explícita em nós pesados, nós aplicamos tudo de forma orientada a eventos.
     public SemanticAnalyzer semAnal = new SemanticAnalyzer();
     public CodeGenerator codeGen = new CodeGenerator();
+    
+    // ANOTAÇÃO PARTE 2: A Pilha (Stack) abaixo guarda momentaneamente rótulos Assembly "L1, L2, LX.." falsos e puros gerados 
+    // Ela nos ajuda a acoplar lógicas de Jumps nos { blocos de fechamento } distantes. (Pois no IF...ELSE, o laço e o fechamento dele não estão na mesma regra atômica linear).
     public java.util.Stack<String> labelStack = new java.util.Stack<>();
 
     public void syntax_error(Symbol s) {
@@ -31,6 +36,11 @@ non terminal declaracao;
 non terminal String tipo;
 non terminal atribuicao, atribuicao_inc;
 non terminal if_else, opt_else, while_loop, for_loop, io;
+
+// ANOTAÇÃO PARTE 2: "expressao" e "termo" agora nos devolve (no momento de sua resolução/desfecho) 
+// Uma caixa `ExprData` cheia com dois valores de suma importância.
+// Assim, nós podemos pegar o TIPO (ex: Inteiro ou Real) e jogar no verificador semântico de incompatibilidade.. 
+// Enquanto passamos o nome TEMP (Ex: t0) e jogamos no registrador de Assembly falso. A peça une 2 quebra-cabeças!
 non terminal ExprData expressao, termo;
 
 precedence left IGUAL_IGUAL, MENOR, MAIOR;
@@ -40,6 +50,8 @@ precedence left ELSE;
 
 start with bloco_comandos;
 
+// ANOTAÇÃO PARTE 2: Ao toparmos com `{`, registramos no objeto Analisador a diretiva global [Entrar em Sub-Escopo Local]. 
+// Ao toparmos com os `}`, fechamos aquele contexto de varíaveis locais, recuando-as da Tabela de Símbolos.
 bloco_comandos ::= ABRE_CHAVE {: semAnal.enterScope(); :} lista_cmds FECHA_CHAVE {: semAnal.exitScope(); :}
                  | ABRE_CHAVE {: semAnal.enterScope(); :} FECHA_CHAVE {: semAnal.exitScope(); :};
 
@@ -54,6 +66,8 @@ comando        ::= declaracao
                  | io
                  | bloco_comandos;
 
+// ANOTAÇÃO PARTE 2: Interceptando Variáveis Declaradas para o escopo Semântico de (Checagem de Nomes).
+// Acionamos em "tleft+1" e "tright+1" uma anotação das Linha/Coluna para aparecer de forma exata no log de erro.
 declaracao     ::= tipo:t ID:i PONTO_VIRGULA {: 
                      semAnal.checkDeclaration(i, t, tleft + 1, tright + 1); 
                  :};
@@ -63,6 +77,10 @@ tipo           ::= TIPO_INT  {: RESULT = "int";  :}
                  | TIPO_CHR  {: RESULT = "chr";  :}
                  | TIPO_STR  {: RESULT = "str";  :};
 
+// ANOTAÇÃO PARTE 2: Regra de Atribuição interceptada. 
+// Ações de Contexto Semântico acionam checkUsage (se existe a variavel da esquerda)
+// Ações de Contexto Semântico acionam checkAssignment (verifica se as duas peças se aceitam, ex String não entra em Real)
+// Ação do CodeGen no fina.
 atribuicao     ::= ID:i IGUAL expressao:e PONTO_VIRGULA {:
                      String varType = semAnal.checkUsage(i, ileft + 1, iright + 1);
                      semAnal.checkAssignment(varType, e.type, ileft + 1, iright + 1);
@@ -72,16 +90,17 @@ atribuicao     ::= ID:i IGUAL expressao:e PONTO_VIRGULA {:
 atribuicao_inc ::= ID:i IGUAL expressao:e {:
                      String varType = semAnal.checkUsage(i, ileft + 1, iright + 1);
                      semAnal.checkAssignment(varType, e.type, ileft + 1, iright + 1);
-                     codeGen.emit(i + " = " + e.temp);
+                     codeGen.emit(i + " = " + e.temp); // Típicamente gerado pelas raízes dos For: ex i = t0.
                  :};
 
+// ANOTAÇÃO PARTE 2: Laço IF. Emits enviam `ifFalse tX goto L0` onde será armazenada a veracidade provisória.
 if_else        ::= IF ABRE_PAR expressao:e FECHA_PAR {:
-                     String lFalse = codeGen.newLabel();
-                     codeGen.emit("ifFalse " + e.temp + " goto " + lFalse);
-                     labelStack.push(lFalse);
+                     String lFalse = codeGen.newLabel(); // L0 (Falso)
+                     codeGen.emit("ifFalse " + e.temp + " goto " + lFalse); // Executa o salto assembly se der falso.
+                     labelStack.push(lFalse); // Armazena a variavel do if condicional
                  :} bloco_comandos opt_else {:
-                     String lEndOrFalse = labelStack.pop();
-                     codeGen.emit(lEndOrFalse + ":");
+                     String lEndOrFalse = labelStack.pop(); 
+                     codeGen.emit(lEndOrFalse + ":"); // Desenha/Finaliza a demarcação LX: em caso conclusivo.
                  :};
 
 opt_else       ::= ELSE {:
@@ -111,18 +130,19 @@ while_loop     ::= WHILE {:
 for_loop       ::= FOR ABRE_PAR atribuicao expressao:e PONTO_VIRGULA atribuicao_inc FECHA_PAR bloco_comandos;
 
 io             ::= INPUT ABRE_PAR ID:i FECHA_PAR PONTO_VIRGULA {:
-                     semAnal.checkUsage(i, ileft + 1, iright + 1);
+                     semAnal.checkUsage(i, ileft + 1, iright + 1); // Avisa no semâtico se o dev passou um INPUT em variável que nao foi declarada!
                      codeGen.emit("READ " + i);
                  :}
                  | OUTPUT ABRE_PAR expressao:e FECHA_PAR PONTO_VIRGULA {:
-                     codeGen.emit("PRINT " + e.temp);
+                     codeGen.emit("PRINT " + e.temp); // Registra de impressão assembly em um TEMP computado final.
                  :};
 
+// ANOTAÇÃO PARTE 2: Expressoes e termos matemáticos baseados nos comparadores semânticos de Promoção Casting que devolvemos na Classe do Analisador.
 expressao      ::= expressao:e1 MAIS expressao:e2 {:
-                     String t = semAnal.checkBinaryOperation(e1.type, e2.type, e1left + 1, e1right + 1);
-                     String temp = codeGen.newTemp();
+                     String t = semAnal.checkBinaryOperation(e1.type, e2.type, e1left + 1, e1right + 1); 
+                     String temp = codeGen.newTemp(); 
                      codeGen.emit(temp + " = " + e1.temp + " + " + e2.temp);
-                     RESULT = new ExprData(t, temp);
+                     RESULT = new ExprData(t, temp); 
                  :}
                  | expressao:e1 MENOS expressao:e2 {:
                      String t = semAnal.checkBinaryOperation(e1.type, e2.type, e1left + 1, e1right + 1);
@@ -160,7 +180,7 @@ expressao      ::= expressao:e1 MAIS expressao:e2 {:
                  | termo:t {: RESULT = t; :};
 
 termo          ::= ID:i {:
-                     String t = "UNKNOWN";
+                     String t = "UNKNOWN"; // Usado para evitar desastre recursivo caso o usuario faça `x=2` e caia no try catch silencioso daqui para preencher
                      if (i != null) t = semAnal.checkUsage(i, ileft + 1, iright + 1);
                      RESULT = new ExprData(t, i);
                  :}
