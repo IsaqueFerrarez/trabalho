@@ -1,0 +1,10 @@
+{
+    int numero;
+    str texto;
+    real decimal;
+
+    numero = 10;
+    decimal = 2;
+    numero = decimal;
+    numero = texto + 1;
+}

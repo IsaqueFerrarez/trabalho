@@ -3,20 +3,20 @@ package compilador;
 import java_cup.runtime.*;
 
 parser code {:
-    // Mostra erro com linha e coluna
+    public SemanticAnalyzer semAnal = new SemanticAnalyzer();
+    public CodeGenerator codeGen = new CodeGenerator();
+    public java.util.Stack<String> labelStack = new java.util.Stack<>();
+
     public void syntax_error(Symbol s) {
         System.err.println("Erro de Sintaxe na Linha " + (s.left + 1) + 
                            " Coluna " + (s.right + 1) + ". Token inesperado: " + s.value);
     }
 
-    // AQUI ESTÁ A CORREÇÃO DO "SUCESSO FALSO":
-    // Obriga o parser a lançar uma exceção e parar tudo quando o erro for fatal
     public void unrecovered_syntax_error(Symbol s) throws java.lang.Exception {
         throw new Exception("Erro Fatal de Sintaxe"); 
     }
 :};
 
-/* --- TERMINAIS (Devem bater com o Lexer) --- */
 terminal IF, ELSE, WHILE, FOR, INPUT, OUTPUT;
 terminal TIPO_INT, TIPO_REAL, TIPO_CHR, TIPO_STR;
 terminal TRUE, FALSE;
@@ -24,25 +24,24 @@ terminal MAIS, MENOS, MULT, DIV, IGUAL;
 terminal IGUAL_IGUAL, MENOR, MAIOR;
 terminal ABRE_PAR, FECHA_PAR, ABRE_CHAVE, FECHA_CHAVE, PONTO_VIRGULA;
 terminal String ID;
-terminal Integer NUM; /* Atenção: NUM agora é Integer, pois o Lexer converte o double para int */
+terminal Integer NUM; 
 
-/* --- NÃO TERMINAIS --- */
 non terminal bloco_comandos, lista_cmds, comando;
-non terminal declaracao, tipo, atribuicao, atribuicao_inc;
+non terminal declaracao;
+non terminal String tipo;
+non terminal atribuicao, atribuicao_inc;
 non terminal if_else, opt_else, while_loop, for_loop, io;
-non terminal expressao, termo;
+non terminal ExprData expressao, termo;
 
-/* --- PRECEDÊNCIA (Resolve conflitos matemáticos e if-else) --- */
 precedence left IGUAL_IGUAL, MENOR, MAIOR;
 precedence left MAIS, MENOS;
 precedence left MULT, DIV;
 precedence left ELSE;
 
-/* --- GRAMÁTICA --- */
 start with bloco_comandos;
 
-bloco_comandos ::= ABRE_CHAVE lista_cmds FECHA_CHAVE
-                 | ABRE_CHAVE FECHA_CHAVE;
+bloco_comandos ::= ABRE_CHAVE {: semAnal.enterScope(); :} lista_cmds FECHA_CHAVE {: semAnal.exitScope(); :}
+                 | ABRE_CHAVE {: semAnal.enterScope(); :} FECHA_CHAVE {: semAnal.exitScope(); :};
 
 lista_cmds     ::= comando lista_cmds
                  | comando;
@@ -55,38 +54,125 @@ comando        ::= declaracao
                  | io
                  | bloco_comandos;
 
-declaracao     ::= tipo ID PONTO_VIRGULA;
+declaracao     ::= tipo:t ID:i PONTO_VIRGULA {: 
+                     semAnal.checkDeclaration(i, t, tleft + 1, tright + 1); 
+                 :};
 
-tipo           ::= TIPO_INT | TIPO_REAL | TIPO_CHR | TIPO_STR;
+tipo           ::= TIPO_INT  {: RESULT = "int";  :}
+                 | TIPO_REAL {: RESULT = "real"; :}
+                 | TIPO_CHR  {: RESULT = "chr";  :}
+                 | TIPO_STR  {: RESULT = "str";  :};
 
-atribuicao     ::= ID IGUAL expressao PONTO_VIRGULA;
+atribuicao     ::= ID:i IGUAL expressao:e PONTO_VIRGULA {:
+                     String varType = semAnal.checkUsage(i, ileft + 1, iright + 1);
+                     semAnal.checkAssignment(varType, e.type, ileft + 1, iright + 1);
+                     codeGen.emit(i + " = " + e.temp);
+                 :};
 
-/* Regra auxiliar para incremento do for (i = i + 1) sem ponto e virgula */
-atribuicao_inc ::= ID IGUAL expressao; 
+atribuicao_inc ::= ID:i IGUAL expressao:e {:
+                     String varType = semAnal.checkUsage(i, ileft + 1, iright + 1);
+                     semAnal.checkAssignment(varType, e.type, ileft + 1, iright + 1);
+                     codeGen.emit(i + " = " + e.temp);
+                 :};
 
-if_else        ::= IF ABRE_PAR expressao FECHA_PAR bloco_comandos opt_else;
+if_else        ::= IF ABRE_PAR expressao:e FECHA_PAR {:
+                     String lFalse = codeGen.newLabel();
+                     codeGen.emit("ifFalse " + e.temp + " goto " + lFalse);
+                     labelStack.push(lFalse);
+                 :} bloco_comandos opt_else {:
+                     String lEndOrFalse = labelStack.pop();
+                     codeGen.emit(lEndOrFalse + ":");
+                 :};
 
-opt_else       ::= ELSE bloco_comandos
+opt_else       ::= ELSE {:
+                     String lFalse = labelStack.pop();
+                     String lEnd = codeGen.newLabel();
+                     codeGen.emit("goto " + lEnd);
+                     codeGen.emit(lFalse + ":");
+                     labelStack.push(lEnd);
+                 :} bloco_comandos
                  | /* vazio */ ;
 
-while_loop     ::= WHILE ABRE_PAR expressao FECHA_PAR bloco_comandos;
+while_loop     ::= WHILE {:
+                     String lStart = codeGen.newLabel();
+                     codeGen.emit(lStart + ":");
+                     labelStack.push(lStart);
+                 :} ABRE_PAR expressao:e FECHA_PAR {:
+                     String lFalse = codeGen.newLabel();
+                     codeGen.emit("ifFalse " + e.temp + " goto " + lFalse);
+                     labelStack.push(lFalse);
+                 :} bloco_comandos {:
+                     String lFalse = labelStack.pop();
+                     String lStart = labelStack.pop();
+                     codeGen.emit("goto " + lStart);
+                     codeGen.emit(lFalse + ":");
+                 :};
 
-for_loop       ::= FOR ABRE_PAR atribuicao expressao PONTO_VIRGULA atribuicao_inc FECHA_PAR bloco_comandos;
+for_loop       ::= FOR ABRE_PAR atribuicao expressao:e PONTO_VIRGULA atribuicao_inc FECHA_PAR bloco_comandos;
 
-io             ::= INPUT ABRE_PAR ID FECHA_PAR PONTO_VIRGULA
-                 | OUTPUT ABRE_PAR expressao FECHA_PAR PONTO_VIRGULA;
+io             ::= INPUT ABRE_PAR ID:i FECHA_PAR PONTO_VIRGULA {:
+                     semAnal.checkUsage(i, ileft + 1, iright + 1);
+                     codeGen.emit("READ " + i);
+                 :}
+                 | OUTPUT ABRE_PAR expressao:e FECHA_PAR PONTO_VIRGULA {:
+                     codeGen.emit("PRINT " + e.temp);
+                 :};
 
-expressao      ::= expressao MAIS expressao
-                 | expressao MENOS expressao
-                 | expressao MULT expressao
-                 | expressao DIV expressao
-                 | expressao IGUAL_IGUAL expressao
-                 | expressao MENOR expressao
-                 | expressao MAIOR expressao
-                 | termo;
+expressao      ::= expressao:e1 MAIS expressao:e2 {:
+                     String t = semAnal.checkBinaryOperation(e1.type, e2.type, e1left + 1, e1right + 1);
+                     String temp = codeGen.newTemp();
+                     codeGen.emit(temp + " = " + e1.temp + " + " + e2.temp);
+                     RESULT = new ExprData(t, temp);
+                 :}
+                 | expressao:e1 MENOS expressao:e2 {:
+                     String t = semAnal.checkBinaryOperation(e1.type, e2.type, e1left + 1, e1right + 1);
+                     String temp = codeGen.newTemp();
+                     codeGen.emit(temp + " = " + e1.temp + " - " + e2.temp);
+                     RESULT = new ExprData(t, temp);
+                 :}
+                 | expressao:e1 MULT expressao:e2 {:
+                     String t = semAnal.checkBinaryOperation(e1.type, e2.type, e1left + 1, e1right + 1);
+                     String temp = codeGen.newTemp();
+                     codeGen.emit(temp + " = " + e1.temp + " * " + e2.temp);
+                     RESULT = new ExprData(t, temp);
+                 :}
+                 | expressao:e1 DIV expressao:e2 {:
+                     String t = semAnal.checkBinaryOperation(e1.type, e2.type, e1left + 1, e1right + 1);
+                     String temp = codeGen.newTemp();
+                     codeGen.emit(temp + " = " + e1.temp + " / " + e2.temp);
+                     RESULT = new ExprData(t, temp);
+                 :}
+                 | expressao:e1 IGUAL_IGUAL expressao:e2 {:
+                     String temp = codeGen.newTemp();
+                     codeGen.emit(temp + " = " + e1.temp + " == " + e2.temp);
+                     RESULT = new ExprData("int", temp);
+                 :}
+                 | expressao:e1 MENOR expressao:e2 {:
+                     String temp = codeGen.newTemp();
+                     codeGen.emit(temp + " = " + e1.temp + " < " + e2.temp);
+                     RESULT = new ExprData("int", temp);
+                 :}
+                 | expressao:e1 MAIOR expressao:e2 {:
+                     String temp = codeGen.newTemp();
+                     codeGen.emit(temp + " = " + e1.temp + " > " + e2.temp);
+                     RESULT = new ExprData("int", temp);
+                 :}
+                 | termo:t {: RESULT = t; :};
 
-termo          ::= ID
-                 | NUM
-                 | TRUE
-                 | FALSE
-                 | ABRE_PAR expressao FECHA_PAR;
+termo          ::= ID:i {:
+                     String t = "UNKNOWN";
+                     if (i != null) t = semAnal.checkUsage(i, ileft + 1, iright + 1);
+                     RESULT = new ExprData(t, i);
+                 :}
+                 | NUM:n {:
+                     RESULT = new ExprData("int", n.toString());
+                 :}
+                 | TRUE:tr {:
+                     RESULT = new ExprData("int", "true");
+                 :}
+                 | FALSE:fa {:
+                     RESULT = new ExprData("int", "false");
+                 :}
+                 | ABRE_PAR expressao:e FECHA_PAR {:
+                     RESULT = e;
+                 :};

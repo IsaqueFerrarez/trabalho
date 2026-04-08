@@ -1,0 +1,15 @@
+{
+    int limit;
+    int i;
+    int counter;
+    limit = 10;
+    counter = 0;
+    
+    while (counter < limit) {
+        counter = counter + 1;
+    }
+
+    for (i = 0; i < 5; i = i + 1) {
+        output(i);
+    }
+}

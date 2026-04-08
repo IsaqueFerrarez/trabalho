@@ -1,0 +1,12 @@
+{
+    real x;
+    int y;
+    x = 5.5;
+    y = 2;
+    if (y < 5) {
+        x = y;
+    } else {
+        x = x * 2;
+    }
+    output(x);
+}

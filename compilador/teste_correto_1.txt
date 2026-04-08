@@ -1,0 +1,9 @@
+{
+    int a;
+    int b;
+    int sum;
+    input(a);
+    b = 10;
+    sum = a + b;
+    output(sum);
+}

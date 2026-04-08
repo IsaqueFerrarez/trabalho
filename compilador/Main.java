@@ -3,19 +3,18 @@ package compilador;
 import java.io.FileReader;
 import java.nio.file.Paths;
 import java.io.File;
+import java.io.FileWriter;
+import java.io.BufferedWriter;
+import java.util.List;
 
 public class Main {
     public static void main(String[] args) {
-        // Pega o diretório atual onde você roda o comando java
         String rootPath = Paths.get("").toAbsolutePath().toString();
-        
-        // Ajuste aqui: Se os .txt estiverem dentro da pasta 'compilador', deixe assim.
-        // Se estiverem na pasta raiz 'trabalho', mude para "/"
         String subPath = "/compilador/"; 
 
         String[] arquivosTeste = {
-            "teste_io.txt", "teste_condicional.txt", "teste_loop.txt",
-            "erro_lexico.txt", "erro_sintatico.txt", "erro_expressao.txt"
+            "teste_correto_1.txt", "teste_correto_2.txt", "teste_correto_3.txt",
+            "teste_erro_semantico_1.txt", "teste_erro_semantico_2.txt", "teste_erro_semantico_3.txt"
         };
 
         for (String arquivo : arquivosTeste) {
@@ -33,11 +32,31 @@ public class Main {
                 Lexer lexer = new Lexer(new FileReader(caminhoCompleto));
                 parser p = new parser(lexer);
                 p.parse();
-                System.out.println("Sucesso! Sintaxe correta.");
+                
+                if (p.semAnal.hasErrors()) {
+                    System.out.println("Erros Semanticos encontrados:");
+                    for(String err : p.semAnal.getErrors()) {
+                        System.out.println(err);
+                    }
+                } else {
+                    System.out.println("Sucesso! Sintaxe e Semântica corretas.");
+                    String outputName = caminhoCompleto.replace(".txt", ".asm");
+                    
+                    try (BufferedWriter writer = new BufferedWriter(new FileWriter(outputName))) {
+                        List<String> code = p.codeGen.getCode();
+                        for (String instr : code) {
+                            writer.write(instr);
+                            writer.newLine();
+                        }
+                        System.out.println("Código gerado e salvo em: " + outputName);
+                    } catch (Exception ioE) {
+                        System.out.println("Erro ao salvar o arquivo ASM.");
+                        ioE.printStackTrace();
+                    }
+                }
 
             } catch (Exception e) {
                 System.out.println("ERRO NA COMPILAÇÃO:");
-                // Isso vai imprimir o erro real (ex: linha/coluna ou arquivo inexistente)
                 e.printStackTrace(); 
             }
         }
